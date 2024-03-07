@@ -9,7 +9,8 @@ from sqlalchemy import (
     Boolean,
     Float,
     MetaData,
-    TIMESTAMP
+    TIMESTAMP,
+    Text
 )
 from database import Base
 from sqlalchemy.orm import relationship
@@ -98,11 +99,22 @@ class WarehouseData(Base):
     amount = Column(Integer)
 
 
-class ProductHistory(Base):
-    __tablename__ = 'product_history'
+class WarehouseExchangeHistory(Base):
+    __tablename__ = 'warehouse_exchange_history'
     metadata = metadata
     id = Column('id', Integer, primary_key=True, autoincrement=True)
     product_id = Column('product_id', Integer, ForeignKey('products.id'))
-    warehouse1_id = Column('warehouse1_id', Integer, ForeignKey('warehouse.id'))
-    warehouse2_id = Column('warehouse2_id', Integer, ForeignKey('warehouse.id'))
+    from_warehouse = Column('from_warehouse', Integer, ForeignKey('warehouse.id'))
+    to_warehouse = Column('to_warehouse', Integer, ForeignKey('warehouse.id'))
+    last_update = Column('last_update', TIMESTAMP, default=datetime.utcnow())
+
+
+class DeletedProductsWarehouse(Base):
+    __tablename__ = 'deleted_products_warehouse'
+    metadata = metadata
+    id = Column('id', Integer, primary_key=True, autoincrement=True)
+    product_id = Column('product_id', Integer, ForeignKey('products.id'))
+    warehouse_id = Column('warehouse_id', Integer, ForeignKey('warehouse.id'))
+    reason = Column('reason', Text, nullable=False)
+    user_id = Column('user_id', Integer, ForeignKey('users.id'))
     last_update = Column('last_update', TIMESTAMP, default=datetime.utcnow())

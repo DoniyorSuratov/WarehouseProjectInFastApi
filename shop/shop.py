@@ -6,6 +6,7 @@ from sqlalchemy import select, insert, update
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.operators import and_
 
 from auth.utils import verify_token
 from database import get_async_session
@@ -51,9 +52,13 @@ async def add_product(
     order_id = await session.execute(query)
     order_id = order_id.scalar_one()
 
-    pro_query = select(WarehouseData.amount).where(WarehouseData.product_id == data.product_id)
+    pro_query = select(WarehouseData.amount).where(and_(WarehouseData.product_id == data.product_id,
+                                                        WarehouseData.warehouse_id == data.warehouse_id))
     product_amount = await session.execute(pro_query)
-    product_amount = product_amount.scalar_one()
+    try:
+        product_amount = product_amount.scalar_one()
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="Product or Order does not exist in this warehouse")
 
     if order_id and product_amount > data.count:
         cart_query = insert(ShoppingCart).values(user_id=user_id, product_id=data.product_id, count=data.count, order_id=order_id, warehouse_id=data.warehouse_id).returning(ShoppingCart.id)
@@ -63,6 +68,7 @@ async def add_product(
         return {"shopping_cart_id": cart_id}
 
     raise HTTPException(status_code=200, detail="Products added to order successfully")
+
 
 
 @shop_router.post("/confirm-order")
@@ -133,15 +139,15 @@ async def create_payment(
         session: AsyncSession = Depends(get_async_session),
         token: dict = Depends(verify_token)
         ):
-    data = select(Order.total_debt).where(Order.id == data.order_id)
-    my_order = await session.execute(data)
+    query = select(Order.total_debt).where(Order.id == data.order_id)
+    my_order = await session.execute(query)
     total_debt = my_order.scalar_one()
-    if total_debt < data.debt:
-        summa = data.debt - total_debt
-        return {"You paid more then expected": summa}
+    if total_debt < data.payment:
+        summ = data.debt - total_debt
+        return {"You paid more then expected": summ}
     else:
-        summa = total_debt - data.debt
-    query = update(Order).where(Order.id == data.order_id).values(total_debt=summa)
+        summ = total_debt - data.payment
+    query = update(Order).where(Order.id == data.order_id).values(total_debt=summ, paid=data.payment)
     await session.execute(query)
     await session.commit()
 

@@ -5,8 +5,6 @@ from datetime import datetime
 
 class AllProductsScheme(BaseModel):
     name: str
-    amount: int
-    price: float
     category_id: int
 
 

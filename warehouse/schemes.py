@@ -27,8 +27,28 @@ class AboutWarehouseScheme(BaseModel):
     latitude: float
     category_id: int
 
+
 class ExchangeProductScheme(BaseModel):
     from_warehouse_id: int
     to_warehouse_id: int
     amount: int
     product_id: int
+
+
+class ExchangeProductHistoryScheme(BaseModel):
+    from_warehouse: int
+    to_warehouse: int
+    product_id: int
+
+
+class DeleteProductWarehouseScheme(BaseModel):
+    warehouse_id: int
+    product_id: int
+    reason: str
+
+
+class GetProductScheme(BaseModel):
+    warehouse_id: int
+    product_id: int
+    amount: int
+    price: float
