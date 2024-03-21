@@ -5,26 +5,40 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, insert, update
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql.operators import and_
 
-from auth.utils import verify_token
+from admin.schemes import UserRoleScheme
+from auth.accounts import user_info
+from auth.schemes import UserOutDB, UserOutDBScheme
+from auth.utils import verify_token, get_user_info_by_id, get_shopping_cart_by_order
 from database import get_async_session
 from models.models import Users, Categories, Products, ShoppingCart, Order, WarehouseData
-from .schemes import AllProductsScheme, ProductsScheme, PaymentScheme, ConfirmScheme
+from warehouse.schemes import ShiftScheme, MachineScheme
+from .schemes import AllProductsScheme, ProductsScheme, PaymentScheme, ConfirmScheme, OrderScheme
 
 shop_router = APIRouter()
 
 
-@shop_router.post("/get-products", response_model=List[AllProductsScheme])
+@shop_router.get("/get-products", response_model=List[AllProductsScheme])
 async def get_products(session: AsyncSession = Depends(get_async_session)):
     try:
-        data = select(Products)
+        data = select(Products).options(selectinload(Products.category))
         products = await session.execute(data)
         products_data = products.scalars()
-        return products_data
+
+        result = []
+        for product in products_data:
+            result.append(
+                AllProductsScheme(
+                    name=product.name,
+                    category=product.category.name
+                )
+            )
+        return result
     except NoResultFound:
         raise HTTPException(status_code=400, detail="Product not found")
+
 
 
 @shop_router.post("/create-order")
@@ -55,19 +69,18 @@ async def add_product(
     pro_query = select(WarehouseData.amount).where(and_(WarehouseData.product_id == data.product_id,
                                                         WarehouseData.warehouse_id == data.warehouse_id))
     product_amount = await session.execute(pro_query)
+    product_amount = product_amount.scalar_one()
+
     try:
-        product_amount = product_amount.scalar_one()
+        if order_id and product_amount:
+            if product_amount > data.count:
+                cart_query = insert(ShoppingCart).values(user_id=user_id, product_id=data.product_id, count=data.count, order_id=order_id, warehouse_id=data.warehouse_id)
+                await session.execute(cart_query)
+                await session.commit()
+                return {"success": True, "message": "Product added to cart"}
+
     except NoResultFound:
         raise HTTPException(status_code=404, detail="Product or Order does not exist in this warehouse")
-
-    if order_id and product_amount > data.count:
-        cart_query = insert(ShoppingCart).values(user_id=user_id, product_id=data.product_id, count=data.count, order_id=order_id, warehouse_id=data.warehouse_id).returning(ShoppingCart.id)
-        result = await session.execute(cart_query)
-        cart_id = result.scalar_one()
-        await session.commit()
-        return {"shopping_cart_id": cart_id}
-
-    raise HTTPException(status_code=200, detail="Products added to order successfully")
 
 
 
@@ -75,30 +88,29 @@ async def add_product(
 async def confirm_order(
         data: ConfirmScheme,
         token: dict = Depends(verify_token),
-        session: Session = Depends(get_async_session)
+        session: AsyncSession = Depends(get_async_session)
 ):
+
     query = select(Products).join(ShoppingCart, Products.id == ShoppingCart.product_id).where(
-        ShoppingCart.id == data.cart_id)
+        ShoppingCart.order_id == data.order_id)
     product_data = await session.execute(query)
     product_data = product_data.scalars().all()
 
     query = select(WarehouseData).join(ShoppingCart, WarehouseData.product_id == ShoppingCart.product_id).where(
-        ShoppingCart.id == data.cart_id)
+        ShoppingCart.order_id == data.order_id)
     warehouse_data = await session.execute(query)
     warehouse_sum = warehouse_data.scalars().all()
 
-
     query2 = select(ShoppingCart).join(Products, ShoppingCart.product_id == Products.id).where(
-        ShoppingCart.id == data.cart_id)
+        ShoppingCart.order_id == data.order_id)
     cart_data = await session.execute(query2)
     cart_data = cart_data.scalars().all()
 
     # Calculate total price
     total_price = sum(product.price * cart.count for product, cart in zip(warehouse_sum, cart_data))
 
-    query3 = update(Order).where(Order.hash == data.hash).values(cart_id=data.cart_id, total_debt=total_price)
+    query3 = update(Order).where(Order.hash == data.hash).values(total_debt=total_price)
     await session.execute(query3)
-
 
     for product, cart in zip(warehouse_sum, cart_data):
         new_amount = product.amount - cart.count
@@ -113,24 +125,49 @@ async def confirm_order(
 
         await session.execute(query4)
 
-        await session.commit()
+    await session.commit()
 
     return {"message": "Order confirmed successfully"}
 
 
-@shop_router.get("/all-my-orders")
+@shop_router.get("/all-my-orders", response_model=List[OrderScheme])
 async def my_orders(
         session: AsyncSession = Depends(get_async_session),
         token: dict = Depends(verify_token)
 ):
     try:
         user_id = token.get("user_id")
-        query = select(Order).where(Order.user_id == user_id)
+
+        # Join Order and ShoppingCart tables to filter based on user_id
+        query = select(Order).join(ShoppingCart).options(
+            selectinload(Order.user),
+            selectinload(Order.cart)
+        ).filter(
+            Order.user_id == user_id,
+            ShoppingCart.user_id == user_id,
+            ShoppingCart.order_id == Order.id
+        )
+
         data = await session.execute(query)
-        my_orders = data.scalars().all()
-        return {"my_orders": my_orders}
-    except:
-        raise HTTPException (status_code=400, detail="Orders not found")
+        orders = data.scalars().all()
+
+        my_orders_list = []
+        seen_order_ids = set()
+        for order in orders:
+            if order.id not in seen_order_ids:
+                shopping_cart_items = await get_shopping_cart_by_order(order.user_id, order.id, session)
+                my_orders_list.append(OrderScheme(
+                    user=await get_user_info_by_id(order.user_id, session),
+                    cart=shopping_cart_items,
+                    total_debt=order.total_debt,
+                    paid=order.paid,
+                    hash=order.hash
+                ))
+                seen_order_ids.add(order.id)
+
+        return my_orders_list
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Orders not found")
 
 
 @shop_router.post("/payment")
@@ -150,6 +187,8 @@ async def create_payment(
     query = update(Order).where(Order.id == data.order_id).values(total_debt=summ, paid=data.payment)
     await session.execute(query)
     await session.commit()
+
+    return {"status": True,"message": "Payment successful"}
 
 
 

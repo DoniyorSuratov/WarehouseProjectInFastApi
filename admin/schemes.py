@@ -9,5 +9,13 @@ class UserRoleScheme(BaseModel):
 
 class ProductScheme(BaseModel):
     name: str
-    amount: int
     category_id: int
+
+
+class UserMachineScheme(BaseModel):
+    username: str
+    machine_id: int
+
+class AddShiftScheme(BaseModel):
+    username: str
+    shift_id: int

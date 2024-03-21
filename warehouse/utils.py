@@ -1,4 +1,5 @@
 from fastapi import Depends
+from sqlalchemy.orm import selectinload
 
 from auth.utils import verify_token
 from database import get_async_session
@@ -14,11 +15,11 @@ async def is_admin(token: dict = Depends(verify_token), session: AsyncSession = 
     if token is None:
         raise HTTPException(status_code=401, detail="You don't have permission to perform this action to perform action ask admin.")
     user_id = token.get('user_id')
-    query = select(Users).where(Users.id == user_id)
+    query = select(Users).options(selectinload(Users.role)).where(Users.id == user_id)
     user_data = await session.execute(query)
     try:
         user = user_data.scalar()
-        if user.role_id == 1:
+        if user.role.role == 'handler':
             return token
         else:
             raise HTTPException(status_code=403, detail="You don't have permission to perform this action")

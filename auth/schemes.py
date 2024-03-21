@@ -1,5 +1,10 @@
+from typing import Optional
+
 from pydantic import BaseModel
 from datetime import datetime
+
+from admin.schemes import UserRoleScheme
+from warehouse.schemes import ShiftScheme, MachineScheme
 
 
 class User(BaseModel): #get from front-end
@@ -18,6 +23,7 @@ class UserInDB(BaseModel): #save to DB
     password: str
     last_name: str
     phone_number: str
+    role_id: int
 
 class UserOutDB(BaseModel):
     first_name: str
@@ -25,12 +31,17 @@ class UserOutDB(BaseModel):
     last_name: str
     phone_number: str
 
-class UserOutDBScheme(BaseModel):
-    id: int
-    first_name: str
-    username: str
-
 
 class UserLogin(BaseModel):
     username: str
     password: str
+
+
+class UserOutDBScheme(BaseModel):
+    first_name: str
+    last_name: str
+    username: str
+    phone_number: str
+    role: UserRoleScheme
+    shift: ShiftScheme
+    machine: Optional[MachineScheme] = None

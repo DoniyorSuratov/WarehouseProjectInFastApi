@@ -4,10 +4,13 @@ from datetime import datetime, timedelta
 
 import jwt
 from fastapi import APIRouter
+from sqlalchemy.orm import selectinload
 
+from admin.schemes import UserRoleScheme
 from database import get_async_session
 from models.models import Users, Role
-from .utils import generate_token, verify_token, algorithm
+from warehouse.schemes import MachineScheme, ShiftScheme
+from .utils import generate_token, verify_token, algorithm, get_user_info_by_id
 from .schemes import User, UserOutDB, UserInDB, UserLogin, UserOutDBScheme
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, APIRouter, HTTPException
@@ -39,7 +42,7 @@ async def register(user: User, session: AsyncSession = Depends(get_async_session
     # Hash the password
     password = pwd_context.hash(user.password1)
     # Create a UserInDB instance with hashed password
-    user_in_db = UserInDB(**dict(user), password=password)
+    user_in_db = UserInDB(**dict(user), password=password, )
 
     # Convert UserInDB instance to dictionary
     user_in_db_dict = user_in_db.dict()
@@ -95,15 +98,12 @@ async def user_info(
         token: dict = Depends(verify_token),
         session: AsyncSession = Depends(get_async_session)
 ):
+
     if token is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     user_id = token.get('user_id')
-    query = select(Users).where(Users.id == user_id)
-    user__data = await session.execute(query)
-    try:
-        user_data = user__data.scalar()
-        return user_data
-    except NoResultFound:
-        raise HTTPException(status_code=400, detail="User not found")
+    data = await get_user_info_by_id(user_id, session)
+    return data
+
 
 

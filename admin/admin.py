@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, insert
+from sqlalchemy import select, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from auth.utils import verify_token
 from database import get_async_session
 from models.models import Users, Categories, Role, Products
 from warehouse.utils import is_admin
-from .schemes import CategoryAddScheme, UserRoleScheme, ProductScheme
+from .schemes import CategoryAddScheme, UserRoleScheme, ProductScheme, UserMachineScheme, AddShiftScheme
 
 admin_router = APIRouter()
 
@@ -49,3 +50,35 @@ async def add_product(
     await session.execute(product)
     await session.commit()
     return {"status": True, 'message': 'Product sucessfully added'}
+
+
+@admin_router.post('/add-machinery')
+async def add_product(
+        data: UserMachineScheme,
+        token: dict = Depends(is_admin),
+        session: AsyncSession = Depends(get_async_session)
+):
+    query = select(Users).options(selectinload(Users.role)).where(Users.username==data.username)
+    result = await session.execute(query)
+    user = result.scalar()
+    if user.role.role != 'worker':
+        return {"status":400, "message": "You can not add machine to this user"}
+    query2 = update(Users).where(Users.username == data.username).values(machine_id=data.machine_id)
+    await session.execute(query2)
+    await session.commit()
+    return {"status": 200, "message": "Machine added successfully"}
+
+
+@admin_router.post('/add-shift')
+async def add_product(
+        data: AddShiftScheme,
+        token: dict = Depends(is_admin),
+        session: AsyncSession = Depends(get_async_session)
+):
+    try:
+        query2 = update(Users).where(Users.username == data.username).values(shift_id=data.shift_id)
+        await session.execute(query2)
+        await session.commit()
+        return {"status": 200, "message": "Machine added successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
